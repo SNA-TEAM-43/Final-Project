@@ -12,6 +12,7 @@ See **[Edge lab host](./edge-lab-host.md)** for the primary deployment topology 
 - **Durability boundary:** offload blob bytes to S3 via server-side SDK (`PutObject` or equivalent multipart API if you evolve past small images).
 - **Observability:** register Prometheus collectors and middleware (request counting, histograms); emit structured logs (stdout JSON recommended).
 - **Operational hooks:** semantics should match Kubernetes **readiness** and **liveness** paths (often separate).
+- **Critical notifications:** optional **producer** publishes short JSON payloads to **RabbitMQ** (severity, summary, dedupe hints); the **Telegram notifier worker** handles Bot API concurrency—see **[RabbitMQ](./rabbitmq.md)** and **[Telegram](./telegram.md)**.
 
 ---
 
@@ -51,14 +52,19 @@ These are the intended routes for the coursework stack. Adjust implementations t
 | `S3_USE_PATH_STYLE` | `true` for many MinIO setups. | `true` |
 | `UPLOAD_PREFIX` | Key prefix (`images/`). | `images/` |
 | `ENV` | `dev`/`prod` toggle for verbose logs. | `dev` |
+| `RABBITMQ_URL` | When enabling notifications broker: **`amqp://rabbitmq:5672/`**. | Compose service DNS |
+| `NOTIFY_EXCHANGE` | Topic/direct exchange declaration name. | `notifications` |
+| `NOTIFY_ROUTING_KEY` | Default routing key for API-emitted notices. | `event.critical` |
 
 Add more as implementation grows (timeouts, max body size).
+
+**Publishing behaviour:** Prefer **bounded-time** async publish helpers or goroutine offload so **latency for HTTP callers** stays stable while broker or worker is degraded; expose **publisher error counter** Prometheus metrics separately from HTTP handler metrics.
 
 ---
 
 ## Suggested repo layout for this binary
 
-Typically `cmd/server/main.go` with handlers under `internal/api` and storage under `internal/storage`. Dockerfile builds this target.
+Typically `cmd/server/main.go` with handlers under `internal/api` and storage under `internal/storage`. The server image is one Dockerfile **`target`**; **Telegram notifier** and optional **alert-amqp-gateway** are separate targets (**[GitHub Actions](./github-actions.md)**).
 
 ---
 
@@ -69,4 +75,4 @@ Typically `cmd/server/main.go` with handlers under `internal/api` and storage un
 - After `docker compose up`, verify from the workstation: `curl http://<host-ip>:9080/health` (substitute published NGINX port).
 - Operational visibility: **`docker compose logs -f api`** over **SSH**, or use the **[API endpoint table](#api-endpoints-target-contract)** from the workstation (`curl …/health`, `…/api/ping`).
 
-See also [Edge lab host](./edge-lab-host.md), [Docker Compose](./docker-compose.md), [S3](./s3-storage.md), [Prometheus](./prometheus.md), and [Kubernetes](./kubernetes.md) for probe paths and scraping.
+See also [Edge lab host](./edge-lab-host.md), [Docker Compose](./docker-compose.md), [S3](./s3-storage.md), [Prometheus](./prometheus.md), [RabbitMQ](./rabbitmq.md), [Telegram](./telegram.md), and [Kubernetes](./kubernetes.md) for probe paths and scraping.

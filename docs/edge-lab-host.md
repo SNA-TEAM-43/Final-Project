@@ -4,7 +4,7 @@ This project assumes a **split topology** for labs and coursework demos:
 
 | Tier | Machine | Role |
 | --- | --- | --- |
-| **Edge lab host** | Small always-on server (**Raspberry Pi** 4/5 or similar, **Ubuntu Server** amd64/arm64) | Runs **all server-side** components: reverse proxy, Go API, Prometheus, object storage (MinIO) or cloud S3 access, optional Alertmanager/Kubernetes. |
+| **Edge lab host** | Small always-on server (**Raspberry Pi** 4/5 or similar, **Ubuntu Server** amd64/arm64) | Runs **all server-side** components: reverse proxy, Go API, Prometheus, **RabbitMQ**, **Telegram notifier worker**, object storage (MinIO) or cloud S3, optional webhook relay **→ AMQP**, optional Alertmanager/Kubernetes. |
 | **Workstation** | Your laptop or desktop (any OS) | Runs only the **Go load-testing client**, web browser, and SSH client. |
 
 Naming: **edge lab host** means “single-node home/lab server at the network edge,” not a managed cloud region. It intentionally has **tight CPU/RAM/IO** so saturation and recovery stories are visible without large clusters.
@@ -35,6 +35,8 @@ flowchart LR
     PM[Prometheus]
     STO[(MinIO or cloud S3)]
     AM_OPT[Alertmanager optional]
+    RMQ_EDGE[(RabbitMQ)]
+    TWORK[Telegram notifier worker]
     K8S_OPT[k3s/K8s optional]
   end
 
@@ -42,12 +44,15 @@ flowchart LR
   NX --> API
   API --> STO
   PM -.->|scrape /metrics| API
+  API -.->|critical events| RMQ_EDGE
+  AM_OPT -.->|webhook optional| RMQ_EDGE
+  RMQ_EDGE --> TWORK
   SSH --> edge
   CURL --> NX
 ```
 
 - **GitHub Actions** does **not** run on the Pi by default—it runs on GitHub’s runners (build/test/publish). The host **consumes** images or binaries produced there (pull from registry, or `docker compose build` on device).
-- **Telegram** is cloud API: Alertmanager on the host (or relay) calls `api.telegram.org`.
+- **Telegram** is invoked only by the **notifier worker** over HTTPS to **`api.telegram.org`**; **RabbitMQ** sits between publishers and that worker (**[rabbitmq.md](./rabbitmq.md)**, **[telegram.md](./telegram.md)**).
 
 ---
 
@@ -76,7 +81,13 @@ flowchart LR
 
 - **Prometheus** container on the same Compose network; scrape target `api:8080` by **service name**.
 - Optionally publish Prometheus UI on a **host-LAN-only** port (e.g. `9090` bound to `127.0.0.1` and use **SSH tunnel** from workstation: `ssh -L 9090:127.0.0.1:9090 user@pi`). Avoid exposing `/metrics` and Prometheus to the public internet without auth.
-- **Alertmanager** on the host can receive alerts and call **Telegram** webhooks (egress HTTPS to Telegram is fine from Pi).
+- **Alertmanager** **`webhook_configs`** should **`POST`** to an **Alertmanager‑to‑AMQP relay** (small HTTP receiver on Docker network) which **enqueues** into **RabbitMQ**—matching the **Go API publisher** path [described](./rabbitmq.md).
+
+### RabbitMQ · Telegram notifier
+
+- Add **`rabbitmq:3-management-alpine`** (or equivalent arm64-capable tag) plus a **telegram-notifier** image built from this repo (**`cmd/telegram-notifier`** Go main or similarly named Dockerfile target).
+- **5672**: AMQP stays **inside** Compose unless you knowingly expose it for debugging **with auth**.
+- Optional **relay** HTTP service listens only on **`alert-amqp-gateway:8090`** (example) reachable from **`alertmanager`** container.
 
 ### S3-compatible storage
 
@@ -99,9 +110,9 @@ flowchart LR
 
 - **Not** deployed to the edge lab host. Build and run on the **workstation** with `-base-url http://<edge-lab-host>:9080` (through NGINX). See [go-load-client.md](./go-load-client.md).
 
-### Telegram
+### Telegram (via notifier worker)
 
-- No agent required **on** the Pi beyond **Alertmanager** (or a tiny relay) with outbound HTTPS. Store `TELEGRAM_BOT_TOKEN` and chat id in host-side secrets / `.env` for Alertmanager config.
+- Runs as a **container on the Pi**; **broker + worker outbound HTTPS** toward **`api.telegram.org`**. Prefer storing **`TELEGRAM_BOT_TOKEN` only on the worker** secrets / `.env` slice, **not** in the core API runtime when the API merely publishes opaque JSON alerts.
 
 ---
 
@@ -126,4 +137,4 @@ flowchart LR
 
 ## Related docs
 
-- [Go backend](./go-backend.md) · [Load client](./go-load-client.md) · [Compose](./docker-compose.md) · [NGINX](./nginx.md) · [Prometheus](./prometheus.md) · [Kubernetes](./kubernetes.md) · [GitHub Actions](./github-actions.md) · [Telegram](./telegram.md) · [S3](./s3-storage.md)
+- [Go backend](./go-backend.md) · [Load client](./go-load-client.md) · [Compose](./docker-compose.md) · [NGINX](./nginx.md) · [Prometheus](./prometheus.md) · [RabbitMQ](./rabbitmq.md) · [Telegram notifier](./telegram.md) · [Kubernetes](./kubernetes.md) · [GitHub Actions](./github-actions.md) · [S3](./s3-storage.md)

@@ -1,14 +1,14 @@
 # Final project · microservices, resilience & observability
 
-Demonstrate **recovery** and **monitoring** behavior under stress: a Go HTTP surface behind **NGINX**, **S3** for uploads, **Prometheus** for metrics and alerting, **Kubernetes** for automated restarts, **Docker Compose** for local stacks, **GitHub Actions** for delivery and reports, and **Telegram** for critical notifications.
+Demonstrate **recovery** and **monitoring** behavior under stress: a Go HTTP surface behind **NGINX**, **S3** for uploads, **Prometheus** for metrics and alerting, **Kubernetes** for automated restarts, **Docker Compose** for local stacks, **GitHub Actions** for delivery and reports, plus **critical notifications through RabbitMQ** to a **Telegram notifier worker** (buffered, decoupled delivery).
 
-**Target topology · edge lab host:** All **server-side** pieces (API, NGINX, Prometheus, storage, optional Alertmanager/Kubernetes) run on a small **edge lab host**—for example a **Raspberry Pi** with **Ubuntu Server**. The **Go load-testing client** runs on your **workstation** and calls the host over the LAN or internet so you can observe **real network effects**; use **SSH** on the host for logs and **`curl`** or API routes for quick status. Full layout and per-part deploy steps: **[docs/edge-lab-host.md](docs/edge-lab-host.md)**.
+**Target topology · edge lab host:** All **server-side** pieces (API, NGINX, Prometheus, **RabbitMQ**, Telegram worker, storage, optional Alertmanager/Kubernetes) run on a small **edge lab host**—for example a **Raspberry Pi** with **Ubuntu Server**. The **Go load-testing client** runs on your **workstation** and calls the host over the LAN or internet so you can observe **real network effects**; use **SSH** on the host for logs and **`curl`** or API routes for quick status. Full layout and per-part deploy steps: **[docs/edge-lab-host.md](docs/edge-lab-host.md)**.
 
 <div align="center">
 
 **Stack overview**
 
-Go API · Go load client · NGINX · S3 · Prometheus · Kubernetes · Compose · Actions · Telegram
+Go API · Go load client · NGINX · S3 · Prometheus · RabbitMQ · Telegram worker · Kubernetes · Compose · Actions
 
 </div>
 
@@ -24,6 +24,13 @@ Each building block below has a narrow job; together they mimic a **small micros
 - Validates and handles **multipart image uploads**, turns them into object keys and bytes, and talks to storage through the **S3 API** (AWS S3 or a compatible server such as MinIO).
 - Exposes a **`/metrics` (Prometheus)** HTTP endpoint instrumented from handlers (requests, durations, errors) so dashboards and alerts reflect real behaviour.
 - Emits **structured logs** (for example JSON on stdout): request metadata, failures, and upload outcomes. These complement metrics: logs answer *what happened to this request*, metrics answer *how often and how slow*.
+- For **critical human notifications**, publishes **compact JSON messages to RabbitMQ** (non-blocking or short-timeout publish) rather than calling Telegram synchronously—the **[Telegram](./docs/telegram.md)** worker consumes the queue and invokes the Bot API.
+
+### RabbitMQ
+
+- Holds **notification messages** between **producers** (Go API domain events and optionally an **Alertmanager webhook-to-AMQP** relay) and the **Telegram notifier worker**.
+- Gives **durability** and **spike buffering** during Telegram downtime or slow HTTP; isolates outbound rate limits from the API’s request goroutines.
+- On the **[edge lab host](./docs/edge-lab-host.md)** runs as another Compose service (**5672** AMQP internally; expose **management UI** only with care).
 
 ### Go load-testing client
 
@@ -64,8 +71,8 @@ Each building block below has a narrow job; together they mimic a **small micros
 
 ### Telegram (critical notifications)
 
-- Receives **high-signal alerts** when Prometheus rules fire (typically via **Alertmanager** routing) or optionally when your pipeline detects **deploy failures**.
-- Gives **rapid human escalation** for SLO-style breaches—for example sustained 5xx rate, backends down, or storage errors—without requiring someone to watch dashboards continuously.
+- A **Telegram notifier worker** (Go consumer) drains **durable RabbitMQ queues** and calls **`sendMessage`** on the Telegram Bot HTTP API.
+- Prometheus **rules → Alertmanager** should ideally hit a tiny **HTTP relay** that **publishes** into RabbitMQ—same buffering path as the API’s **producer** messages—not a synchronous hop straight to Telegram in hot paths.
 
 ---
 
@@ -84,13 +91,14 @@ Per-part references (API surfaces, configs, tooling): **[docs/README.md](docs/RE
 | Prometheus | [docs/prometheus.md](docs/prometheus.md) |
 | Kubernetes | [docs/kubernetes.md](docs/kubernetes.md) |
 | GitHub Actions | [docs/github-actions.md](docs/github-actions.md) |
-| Telegram notifications | [docs/telegram.md](docs/telegram.md) |
+| RabbitMQ (broker, producers, buffering) | [docs/rabbitmq.md](docs/rabbitmq.md) |
+| Telegram notifier (worker, Bot API) | [docs/telegram.md](docs/telegram.md) |
 
 ---
 
 ## Architecture
 
-Prometheus collects **metrics** (request counts, latencies, error rates). **Structured logs** go to stdout (optional aggregation). Critical thresholds can notify **Telegram** via Alertmanager or a small webhook service.
+Prometheus collects **metrics** (request counts, latencies, error rates). **Structured logs** go to stdout (optional aggregation). Critical notifications flow through **RabbitMQ**, then a **Telegram notifier worker**; Prometheus/Alertmanager can feed that path via an **Alertmanager webhook-to-AMQP** relay (**[docs](./docs/rabbitmq.md)**).
 
 Diagrams use [Mermaid](https://github.com/mermaid-js/mermaid). They render on **GitHub** and in editors that enable Mermaid in Markdown preview (for example VS Code with a Mermaid extension). Plain ASCII labels avoid broken rendering where HTML or emoji in nodes is not supported.
 
@@ -122,11 +130,14 @@ flowchart TB
     S3[(S3 object storage for uploads)]
   end
 
-  subgraph observe[Observability and alerts]
-    direction LR
+  subgraph observe[Observability and alerting]
+    direction TB
     Prom[(Prometheus)]
     AM[Alertmanager]
-    TG[Telegram critical alerts]
+    Relay[Alertmanager webhook to AMQP relay optional]
+    RMQ[(RabbitMQ)]
+    TWorker[Telegram notifier worker Go]
+    TgApi[Telegram Bot API cloud]
   end
 
   subgraph delivery[Delivery]
@@ -146,7 +157,10 @@ flowchart TB
   Pods -.->|scrape /metrics| Prom
   Nginx -.->|optional exporter| Prom
   Prom -.-> AM
-  AM --> TG
+  AM -.-> Relay
+  Relay -.->|publish alerts| RMQ
+  Pods -.->|optional enqueue critical events| RMQ
+  RMQ --> TWorker --> TgApi
 ```
 
 ---
@@ -194,6 +208,7 @@ flowchart LR
     H[HTTP handlers]
     LOG[Structured logs stdout JSON]
     M[Prometheus counters and histograms]
+    Q[Publish critical events to RabbitMQ]
   end
 
   subgraph platform[Platform]
@@ -203,20 +218,29 @@ flowchart LR
   subgraph stack[Observability stack]
     P[(Prometheus)]
     R[Recording and alert rules]
-    Notify[Telegram from alerts]
+    AM2[Alertmanager]
+    REL[Webhook to AMQP relay optional]
+    RMQ2[(RabbitMQ)]
+    TW2[Telegram notifier worker]
+    TG2[Telegram Bot API]
   end
 
   H --> LOG
   H --> M
+  H --> Q
 
   KC -.->|schedules pods| H
 
   M -->|HTTP scrape /metrics| P
   P --> R
-  R --> Notify
+  R --> AM2
+  AM2 -.-> REL
+  REL -.-> RMQ2
+  Q --> RMQ2
+  RMQ2 --> TW2 --> TG2
 ```
 
-> **Logging vs Prometheus:** use Prometheus for counters, histograms, and alerts; keep request IDs and payloads in structured logs unless you additionally ship metrics derived from logs.
+> **Logging vs Prometheus:** use Prometheus for counters, histograms, and alerts; keep request IDs and payloads in structured logs unless you additionally ship metrics derived from logs. Notifications use **RabbitMQ** plus a **Telegram notifier**—see **[docs/rabbitmq.md](docs/rabbitmq.md)** and **[docs/telegram.md](docs/telegram.md)**.
 
 ---
 
@@ -268,7 +292,7 @@ flowchart TB
 
   subgraph verify[Observe outcomes]
     PM[Prometheus latency errors saturation]
-    AL[Alerts to Telegram on SLO breach]
+    AL[RabbitMQ depth plus Telegram delivery demos]
   end
 
   LC --> NX
@@ -287,6 +311,7 @@ flowchart TB
 | Pod crash       | Brief drop in `up`; Kubernetes replaces pod; graphs recover       |
 | S3 degraded     | 5xx spike on upload path; alert if error budget burned           |
 | Rolling deploy  | NGINX sheds traffic from draining pods; replicas stay available  |
+| Telegram worker stopped | RabbitMQ **queue depth rises**; restarting worker **drains backlog**; Prometheus still shows API `up` |
 
 ---
 
@@ -294,16 +319,17 @@ flowchart TB
 
 | Piece | Role in one line |
 | ----- | ---------------- |
-| Edge lab host | Small server **(e.g. Raspberry Pi + Ubuntu)**; runs API, NGINX, Prometheus, storage, alerting; SSH for logs |
+| Edge lab host | Small server **(e.g. Raspberry Pi + Ubuntu)**; runs API, NGINX, Prometheus, RabbitMQ, notifier worker, storage; SSH for logs |
 | Go API | HTTP app, uploads to S3, exposes `/metrics` and structured logs |
 | Go client | Runs on **workstation**; synthetic load + latency/error stats against the **edge lab host** |
 | NGINX | Proxy + load balancing + edge policy |
 | Compose | Portable multi-service dev/demo stack |
 | Kubernetes | Scheduling, probes, replicas, automatic recovery |
-| Prometheus | Metrics scrape, dashboards, alert rules |
+| Prometheus · Alertmanager | Metrics scrape and rules; optional webhook relay into RabbitMQ instead of Telegram directly |
 | GitHub Actions | Build, publish images, deploy, attach reports |
 | S3 | Durable blobs for uploads |
-| Telegram | Escalation for critical alerts or pipeline failures |
+| RabbitMQ | Buffer between publishers (API, webhook relay) and Telegram worker |
+| Telegram worker | Consumes queues; calls Telegram Bot API; holds bot token |
 
 Narrative overview: [Component responsibilities](#component-responsibilities). Per-topic specs: [Documentation](#documentation).
 

@@ -1,6 +1,6 @@
 # Docker Compose (local & demos)
 
-Defines a **multi-container network** that runs the stack without Kubernetes: API, NGINX, Prometheus, optional MinIO, optional Alertmanager.
+Defines a **multi-container network** that runs the stack without Kubernetes: API, NGINX, Prometheus, optional MinIO, **RabbitMQ**, **Telegram notifier worker**, optional **Alertmanager‑to‑AMQP relay**, optional Alertmanager.
 
 On the **[edge lab host](./edge-lab-host.md)**, Compose is usually the **default** orchestration (lighter than Kubernetes on a Pi).
 
@@ -14,8 +14,11 @@ On the **[edge lab host](./edge-lab-host.md)**, Compose is usually the **default
 | `nginx` | `nginx:alpine` + config mount | Publishes `9080:80` (example) to host; proxies to `api`. |
 | `prometheus` | `prom/prometheus` | Mount `prometheus.yml`; scrape `api:8080/metrics`. |
 | `minio` | `minio/minio` | S3 API; create bucket via init container or script. |
+| `rabbitmq` | `rabbitmq:3-management-alpine` | AMQP **5672** on internal network; **15672 management** bind to `127.0.0.1` when possible (**[rabbitmq.md](./rabbitmq.md)**). |
+| `telegram-notifier` | `build: .` target notifier | Consumes RabbitMQ queue; calls Telegram Bot HTTP API (**[telegram.md](./telegram.md)**). |
+| `alert-amqp-gateway` | `build: .` *(optional)* | HTTP receiver for **`webhook_configs`** from Alertmanager → **publish** normalized JSON to RabbitMQ same as API-critical events. |
 
-Add `alertmanager` when you demo [Telegram](./telegram.md) routing.
+Add **`alertmanager`** when you demo firing rules toward the **gateway** (**not** direct Telegram webhook if you showcase buffering consistently).
 
 ---
 
@@ -24,7 +27,7 @@ Add `alertmanager` when you demo [Telegram](./telegram.md) routing.
 | File | Purpose |
 | --- | --- |
 | `docker-compose.yml` | Services, networks, depends_on, published ports. |
-| `.env` (gitignored) | `S3_*`, MinIO root keys, optional Telegram test tokens. |
+| `.env` (gitignored) | `S3_*`, MinIO root keys, **`RABBITMQ_URL` / RabbitMQ defaults**, Telegram **worker** tokens (**not necessarily** on `api`). |
 | `deploy/prometheus/prometheus.yml` | Scrape job for `api:8080`. |
 | `deploy/nginx/*.conf` | Upstream and `client_max_body_size`. |
 
@@ -32,7 +35,7 @@ Add `alertmanager` when you demo [Telegram](./telegram.md) routing.
 
 ## Environment wiring
 
-- Pass `S3_*` into the `api` service `environment:` or `env_file: .env`.
+- Pass **`S3_*`** and **`RABBITMQ_*` / AMQP URLs** into the `api`; pass **`TELEGRAM_*` + `RABBITMQ_URL`** only on **`telegram-notifier`** (recommended split).
 - Use **service DNS names** (`http://minio:9000`) inside the Compose network, not `localhost`.
 
 ---

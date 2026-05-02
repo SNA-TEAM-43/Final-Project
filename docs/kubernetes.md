@@ -64,3 +64,13 @@ Kubernetes on a Pi is **optional** compared to **[Docker Compose](./docker-compo
 - If the Pi strains under control-plane load, declare in your report that **Compose is the Pi default** and **Kubernetes manifests** validate on kind/minikube separately.
 
 Baseline topology: **[Edge lab host](./edge-lab-host.md)**.
+
+---
+
+## Messaging on cluster (optional)
+
+- **Broker:** deploy **Helm RabbitMQ**, **StatefulSet**, or bundled **operators** mirroring Compose—pin **PVC** sizing for queue durability.
+- **Telegram notifier** as **`Deployment`** (one replica often enough): same image as Compose **telegram-notifier** build target.
+- **`alert-amqp-gateway`** `Deployment/Svc` reachable only **`ClusterIP`** from **Alertmanager** pod.
+
+See [RabbitMQ](./rabbitmq.md) and [Telegram](./telegram.md).

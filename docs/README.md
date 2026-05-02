@@ -15,6 +15,7 @@ Topic-specific docs for each part of the stack. Paths are stable for linking fro
 | [Prometheus](./prometheus.md) | Scrape configs, scrape targets, alerting concepts, Grafana |
 | [Kubernetes](./kubernetes.md) | Deployments, Services, probes, resources, rollout recovery |
 | [GitHub Actions](./github-actions.md) | CI/CD workflows, registry, secrets, deploy + reports |
-| [Telegram notifications](./telegram.md) | Alertmanager receivers, webhook-style bots, what to notify on |
+| [RabbitMQ](./rabbitmq.md) | Broker topology, queues, producers (API / webhook relay), Pi persistence |
+| [Telegram notifier](./telegram.md) | Consumer worker → Bot API, alignment with Prometheus path |
 
 Upstream overview and diagrams remain in the [main README](../README.md).

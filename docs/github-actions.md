@@ -44,7 +44,7 @@ Require **CI pass** before merge; optional required reviewers for manifests touc
 ## Relation to the edge lab host
 
 - Actions runs on **GitHub-hosted runners** (or a self-hosted runner if you add one). The **Raspberry Pi / edge lab host** is the **deployment target**, not the default CI machine.
-- **Build `linux/arm64` images** (and optionally `amd64`) so `docker compose pull` on the Pi uses a native image without QEMU surprises.
+- **Build `linux/arm64` images** (and optionally `amd64`) so `docker compose pull` on the Pi uses a native image without QEMU surprises—publish **several Dockerfile targets**: **`server`**, **`telegram-notifier`**, optional **`alert-amqp-gateway`**.
 - **Deliver to the host** by: registry pull + `docker compose up`, **rsync** of compose files + `docker compose build` on device, or **`kubectl apply`** over SSH with a kubeconfig—pick one story and document it in your report.
 - The [load-testing client](./go-load-client.md) is **not** started by Actions for the main “WAN path” narrative unless you add a scheduled job against a **public** URL; the default lab is **workstation → Pi**.
 

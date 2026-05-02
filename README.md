@@ -2,6 +2,8 @@
 
 Demonstrate **recovery** and **monitoring** behavior under stress: a Go HTTP surface behind **NGINX**, **S3** for uploads, **Prometheus** for metrics and alerting, **Kubernetes** for automated restarts, **Docker Compose** for local stacks, **GitHub Actions** for delivery and reports, and **Telegram** for critical notifications.
 
+**Target topology · edge lab host:** All **server-side** pieces (API, NGINX, Prometheus, storage, optional Alertmanager/Kubernetes) run on a small **edge lab host**—for example a **Raspberry Pi** with **Ubuntu Server**. The **Go load-testing client** runs on your **workstation** and calls the host over the LAN or internet so you can observe **real network effects**; use **SSH** on the host for logs and **`curl`** or API routes for quick status. Full layout and per-part deploy steps: **[docs/edge-lab-host.md](docs/edge-lab-host.md)**.
+
 <div align="center">
 
 **Stack overview**
@@ -25,7 +27,7 @@ Each building block below has a narrow job; together they mimic a **small micros
 
 ### Go load-testing client
 
-- Runs **outside** the server process and drives **controlled load** against the API (through **NGINX** if that matches production topology).
+- Runs on the **workstation** (not on the edge lab host) and drives **controlled load** against the API URL of the Pi/server (through **NGINX** on the host when that matches your demo).
 - Mixes **GET**, **POST**, and upload-style calls to simulate realistic or worst-case blends.
 - Records **latency percentiles**, error counts, and timeouts so you can compare runs (before/after faults, scaling, or config changes).
 
@@ -64,6 +66,25 @@ Each building block below has a narrow job; together they mimic a **small micros
 
 - Receives **high-signal alerts** when Prometheus rules fire (typically via **Alertmanager** routing) or optionally when your pipeline detects **deploy failures**.
 - Gives **rapid human escalation** for SLO-style breaches—for example sustained 5xx rate, backends down, or storage errors—without requiring someone to watch dashboards continuously.
+
+---
+
+## Documentation
+
+Per-part references (API surfaces, configs, tooling): **[docs/README.md](docs/README.md)** · index table.
+
+| Topic | Doc |
+| --- | --- |
+| Edge lab host (Pi / Ubuntu deploy, workstation client) | [docs/edge-lab-host.md](docs/edge-lab-host.md) |
+| Go HTTP backend (endpoints, env, logging) | [docs/go-backend.md](docs/go-backend.md) |
+| Go load-testing client | [docs/go-load-client.md](docs/go-load-client.md) |
+| S3-compatible storage | [docs/s3-storage.md](docs/s3-storage.md) |
+| NGINX | [docs/nginx.md](docs/nginx.md) |
+| Docker Compose | [docs/docker-compose.md](docs/docker-compose.md) |
+| Prometheus | [docs/prometheus.md](docs/prometheus.md) |
+| Kubernetes | [docs/kubernetes.md](docs/kubernetes.md) |
+| GitHub Actions | [docs/github-actions.md](docs/github-actions.md) |
+| Telegram notifications | [docs/telegram.md](docs/telegram.md) |
 
 ---
 
@@ -273,8 +294,9 @@ flowchart TB
 
 | Piece | Role in one line |
 | ----- | ---------------- |
+| Edge lab host | Small server **(e.g. Raspberry Pi + Ubuntu)**; runs API, NGINX, Prometheus, storage, alerting; SSH for logs |
 | Go API | HTTP app, uploads to S3, exposes `/metrics` and structured logs |
-| Go client | Synthetic load + latency/error stats |
+| Go client | Runs on **workstation**; synthetic load + latency/error stats against the **edge lab host** |
 | NGINX | Proxy + load balancing + edge policy |
 | Compose | Portable multi-service dev/demo stack |
 | Kubernetes | Scheduling, probes, replicas, automatic recovery |
@@ -283,7 +305,7 @@ flowchart TB
 | S3 | Durable blobs for uploads |
 | Telegram | Escalation for critical alerts or pipeline failures |
 
-Detailed explanations: [Component responsibilities](#component-responsibilities).
+Narrative overview: [Component responsibilities](#component-responsibilities). Per-topic specs: [Documentation](#documentation).
 
 ---
 

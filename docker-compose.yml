@@ -1,0 +1,70 @@
+services:
+  loki: # Loki is the log storage system
+    image: grafana/loki:2.9.8
+    container_name: loki
+    user: "0:0"
+    command: -config.file=/etc/loki/local-config.yaml 
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro # Volume for the Loki config
+      - loki-data:/loki # Volume for the Loki data
+    networks: 
+      - monitoring-network
+
+  promtail: # Promtail is the log shipping system
+    image: grafana/promtail:2.9.8
+    container_name: promtail
+    command: -config.file=/etc/promtail/config.yaml
+    ports:
+      - "9080:9080"
+    volumes:
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yaml:ro # Volume for the Promtail config
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro # Volume for the Docker containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Volume for the Docker socket
+    depends_on:
+      - loki
+    networks:
+      - monitoring-network
+
+  prometheus: # Prometheus is the metric storage system
+    image: prom/prometheus:v2.53.3
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/pometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring-network
+
+  grafana: # Grafana is the dashboard system
+    image: grafana/grafana:11.1.4
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+      - prometheus
+    networks:
+      - monitoring-network
+
+networks: 
+  monitoring-network:
+    driver: bridge
+
+volumes: 
+  loki-data:
+  prometheus-data:
+  grafana-data:

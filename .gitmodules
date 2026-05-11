@@ -1,0 +1,6 @@
+[submodule "services/server/backend"]
+	path = services/server/backend
+	url = https://github.com/SNA-TEAM-43/backend.git
+[submodule "services/server/monitoring"]
+	path = services/server/monitoring
+	url = https://github.com/SNA-TEAM-43/monitoring.git

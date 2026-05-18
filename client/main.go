@@ -27,6 +27,8 @@ func printMenu(url string) {
 	fmt.Println("4) DB cleanup")
 	fmt.Println("5) STRESS (all modes parallel)")
 	fmt.Println("6) KILL (max load)")
+	fmt.Println("7) CHAOS (inject DB failures for 30s)")
+	fmt.Println("8) HEAL  (cancel chaos immediately)")
 	fmt.Println("0) Exit")
 	fmt.Println()
 }
@@ -75,6 +77,14 @@ func main() {
 		case "6":
 			confirm := readLine(scanner, "KILL will load server for several minutes. Continue? [y/N]: ")
 			if err := runKill(client, confirm); err != nil {
+				fmt.Println("Error: ", err)
+			}
+		case "7":
+			if err := runChaos(client); err != nil {
+				fmt.Println("Error: ", err)
+			}
+		case "8":
+			if err := runChaosHeal(client); err != nil {
 				fmt.Println("Error: ", err)
 			}
 		case "0":

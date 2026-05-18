@@ -167,6 +167,31 @@ func runStress(c *Client) error {
 	return errors.Join(errs...)
 }
 
+type chaosStatus struct {
+	Active      bool  `json:"active"`
+	RemainingMS int64 `json:"remaining_ms"`
+}
+
+func runChaos(c *Client) error {
+	fmt.Println("CHAOS: injecting DB write failures for 30 seconds")
+	var res map[string]any
+	if err := c.PostJSON("/chaos/db-fail?duration_ms=30000", nil, &res); err != nil {
+		return err
+	}
+	fmt.Printf("  chaos active — DB writes will fail for ~30s\n")
+	fmt.Printf("  watch: db_queries_total{status=\"failed\"} in Grafana\n")
+	return nil
+}
+
+func runChaosHeal(c *Client) error {
+	var res map[string]any
+	if err := c.PostJSON("/chaos/heal", nil, &res); err != nil {
+		return err
+	}
+	fmt.Println("  chaos cancelled — DB writes restored")
+	return nil
+}
+
 func runKill(c *Client, confirm string) error {
 	if confirm != "y" && confirm != "Y" {
 		fmt.Println("cancelled")

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 const (
@@ -178,8 +179,17 @@ func runChaos(c *Client) error {
 	if err := c.PostJSON("/chaos/db-fail?duration_ms=30000", nil, &res); err != nil {
 		return err
 	}
-	fmt.Printf("  chaos active — DB writes will fail for ~30s\n")
-	fmt.Printf("  watch: db_queries_total{status=\"failed\"} in Grafana\n")
+	fmt.Println("  chaos active — firing DB writes in background for 30s (all will fail)")
+	fmt.Println("  watch: db_queries_total{status=\"failed\"} in Grafana")
+
+	go func() {
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			runDBWriteWith(c, dbWriteParams{QueryCount: 50, Workers: 4, PayloadSize: 256})
+		}
+		fmt.Println("  [chaos] background load done")
+	}()
+
 	return nil
 }
 

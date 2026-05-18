@@ -1,6 +1,6 @@
-[submodule "services/server/backend"]
-	path = services/server/backend
+[submodule "services/backend"]
+	path = services/backend
 	url = https://github.com/SNA-TEAM-43/backend.git
-[submodule "services/server/monitoring"]
-	path = services/server/monitoring
+[submodule "services/monitoring"]
+	path = services/monitoring
 	url = https://github.com/SNA-TEAM-43/monitoring.git
